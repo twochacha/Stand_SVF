@@ -24,9 +24,13 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller --noconfirm --clean --windowed --onedir ^
-            --name StandApp ^
-            stand_main.py
+          pyinstaller `
+          --noconfirm `
+          --clean `
+          --windowed `
+          --onedir `
+          --name StandApp `
+          stand_main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
