@@ -25,7 +25,7 @@ from stand_protocol import parse_stand_packet
 # ======= Настройки =======
 DATA_BAUD = 921600
 DATA_READ_CHUNK = 256
-WINDOW_SIZE = 9000
+WINDOW_SIZE = 20000
 
 VCP_BAUD = 115200
 VCP_DIR = -1
