@@ -352,28 +352,38 @@ class MotionWorker:
                 self._mode = "auto"
 
                 for _ in range(runs):
-                    if not self._auto_flag.is_set():
-                        break
+                    legs_done = 0
 
+                    # направление как сейчас — по половине хода
                     with self.pos_lock:
-                        pos = self.get_pos_mm()
-                    if pos is None:
-                        break
-
-                    # если вне safe — сначала вернуть внутрь ближайшей границе
-                    if pos > SAFE_MAX:
-                        self._send_move_physical(SAFE_MAX - pos, speed)
-                        continue
-                    if pos < SAFE_MIN:
-                        self._send_move_physical(SAFE_MIN - pos, speed)
+                        pos0 = self.get_pos_mm()
+                    if pos0 is None:
+                        self._auto_flag.clear()
+                        self._mode = None
                         continue
 
-                    # правило: если в левой половине -> идём в правый край; иначе в левый
-                    t1 = SAFE_MAX if pos <= MID_MM else SAFE_MIN
-                    t2 = SAFE_MIN if t1 == SAFE_MAX else SAFE_MAX
+                    leg_dir = +1.0 if pos0 <= MID_MM else -1.0
 
-                    d1 = self._clamp_delta_to_safe(pos, t1 - pos)
-                    self._send_move_physical(d1, speed)
+                    while self._auto_flag.is_set():
+
+                        with self.pos_lock:
+                            pos = self.get_pos_mm()
+                        if pos is None:
+                            break
+
+                        edge = SAFE_MAX if leg_dir > 0 else SAFE_MIN
+
+                        delta = self._clamp_delta_to_safe(pos, edge - pos)
+
+                        if abs(delta) < 0.5:
+        # дошли до края
+                            leg_dir *= -1.0
+                            legs_done += 1
+                            if legs_done >= runs:
+                                break
+                            continue
+
+                        self._send_move_physical(delta, speed)
 
                     if not self._auto_flag.is_set():
                         break
