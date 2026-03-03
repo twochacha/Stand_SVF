@@ -341,63 +341,64 @@ class MotionWorker:
                 continue
 
             # ---------------- auto ----------------
+
             if kind == "auto":
                 if not self.vcp.is_connected():
                     continue
 
-                runs = int(item[1])
+                runs = int(item[1])   # теперь это "ноги" (проходы до края), 1 = в одну сторону
                 speed = int(item[2])
 
                 self._auto_flag.set()
                 self._mode = "auto"
 
-                for _ in range(runs):
-                    legs_done = 0
-
-                    # направление как сейчас — по половине хода
+                try:
+                    # стартовое направление как раньше: по половине хода
                     with self.pos_lock:
                         pos0 = self.get_pos_mm()
                     if pos0 is None:
-                        self._auto_flag.clear()
-                        self._mode = None
-                        continue
+                        break
 
-                    leg_dir = +1.0 if pos0 <= MID_MM else -1.0
+                    leg_dir = +1.0 if pos0 <= MID_MM else -1.0  # + к SAFE_MAX, - к SAFE_MIN
+                    legs_done = 0
+                    edge_tol = 0.5  # мм, считаем "дошли до края"
 
                     while self._auto_flag.is_set():
-
                         with self.pos_lock:
                             pos = self.get_pos_mm()
                         if pos is None:
                             break
 
+                        # если вне safe — сначала вернуть внутрь
+                        if pos > SAFE_MAX:
+                            self._send_move_physical(SAFE_MAX - pos, speed)
+                            continue
+                        if pos < SAFE_MIN:
+                            self._send_move_physical(SAFE_MIN - pos, speed)
+                            continue
+
                         edge = SAFE_MAX if leg_dir > 0 else SAFE_MIN
 
-                        delta = self._clamp_delta_to_safe(pos, edge - pos)
-
-                        if abs(delta) < 0.5:
-        # дошли до края
-                            leg_dir *= -1.0
+                        # дошли до края -> засчитываем "ногу" и разворачиваемся
+                        if (leg_dir > 0 and pos >= edge - edge_tol) or (leg_dir < 0 and pos <= edge + edge_tol):
                             legs_done += 1
                             if legs_done >= runs:
                                 break
+                            leg_dir *= -1.0
+                            continue
+
+                        delta = self._clamp_delta_to_safe(pos, edge - pos)
+                        if abs(delta) < 0.5:
+                            # на всякий случай
+                            time.sleep(0.01)
                             continue
 
                         self._send_move_physical(delta, speed)
 
-                    if not self._auto_flag.is_set():
-                        break
+                finally:
+                    self._auto_flag.clear()
+                    self._mode = None
 
-                    with self.pos_lock:
-                        pos2 = self.get_pos_mm()
-                    if pos2 is None:
-                        break
-
-                    d2 = self._clamp_delta_to_safe(pos2, t2 - pos2)
-                    self._send_move_physical(d2, speed)
-
-                self._auto_flag.clear()
-                self._mode = None
                 continue
 
             # ---------------- pressure ----------------
