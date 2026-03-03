@@ -93,7 +93,7 @@ class ControlPanel(QWidget):
         gb_auto = QGroupBox("Автопрогон")
         auto_row = QHBoxLayout()
 
-        auto_row.addWidget(QLabel("Прогонов (в две стороны):"))
+        auto_row.addWidget(QLabel("Прогонов (в одну сторону):"))
         self.spin_runs = QSpinBox()
         self.spin_runs.setRange(1, 100000)
         self.spin_runs.setValue(1)
@@ -146,7 +146,7 @@ class ControlPanel(QWidget):
         self.sp_p_runs = QSpinBox()
         self.sp_p_runs.setRange(1, 100000)
         self.sp_p_runs.setValue(1)
-        press_form.addRow("Прогонов (в две стороны):", self.sp_p_runs)        
+        press_form.addRow("Прогонов (в одну сторону):", self.sp_p_runs)        
 
 
         self.sp_p_target = QDoubleSpinBox()
@@ -177,8 +177,8 @@ class ControlPanel(QWidget):
 
 
         press_btns = QHBoxLayout()
-        self.btn_p_start = QPushButton("Старт (давление)")
-        self.btn_p_stop = QPushButton("Стоп (давление)")
+        self.btn_p_start = QPushButton("Старт")
+        self.btn_p_stop = QPushButton("Стоп")
         self.btn_p_stop.setEnabled(False)
         press_btns.addWidget(self.btn_p_start)
         press_btns.addWidget(self.btn_p_stop)
