@@ -467,7 +467,7 @@ class MotionWorker:
                     if (leg_dir > 0 and pos >= edge - edge_tol) or (leg_dir < 0 and pos <= edge + edge_tol):
                         leg_dir *= -1.0
                         legs_done += 1
-                        if legs_done >= runs * 2:
+                        if legs_done >= runs:
                             self._auto_flag.clear()
                             break
                         continue
