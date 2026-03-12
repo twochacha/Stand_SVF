@@ -1,6 +1,6 @@
 
-from PyQt5.QtCore import pyqtSignal
-from PyQt5.QtWidgets import (
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton, QLabel,
     QSpinBox, QGroupBox, QFormLayout, QDoubleSpinBox
 )
@@ -9,9 +9,9 @@ from PyQt5.QtWidgets import (
 class PortSelector(QWidget):
     """Строка выбора порта: комбобокс + Обновить + Подключить/Отключить."""
     
-    connect_clicked = pyqtSignal()
-    disconnect_clicked = pyqtSignal()
-    refresh_clicked = pyqtSignal()
+    connect_clicked = Signal()
+    disconnect_clicked = Signal()
+    refresh_clicked = Signal()
 
     def __init__(self, title: str):
         super().__init__()
@@ -69,10 +69,10 @@ class PortSelector(QWidget):
 class ControlPanel(QWidget):
     """Панель управления: подключения + автопрогон + контроль по давлению + ручной режим."""
 
-    start_auto = pyqtSignal(int, int)       # runs, speed
-    start_pressure = pyqtSignal(dict)       # params dict
-    stop_auto = pyqtSignal()                # stop everything (auto/pressure)
-    jog = pyqtSignal(float)                 # delta_mm
+    start_auto = Signal(int, int)       # runs, speed
+    start_pressure = Signal(dict)       # params dict
+    stop_auto = Signal()                # stop everything (auto/pressure)
+    jog = Signal(float)                 # delta_mm
 
     def __init__(self):
         super().__init__()
@@ -230,7 +230,6 @@ class ControlPanel(QWidget):
                 "accel_down": float(self.sp_accel.value()),
                 "alpha_err": float(self.sp_alpha_err.value()),
             }
-            self.start_pressure.emit(params)
             self.start_pressure.emit(params)
 
         self.btn_p_start.clicked.connect(_emit_pressure_start)
