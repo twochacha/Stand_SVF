@@ -58,13 +58,34 @@ def apply_cal(name: str, raw: float) -> float:
     return raw * float(c["k"]) + float(c["b"])
 
 
-# Ограничения положения (с запасом по 2 мм)
+# Ограничения положения
 MIN_MM = 16.0
 MAX_MM = 78.0
-MARGIN_MM = 2.0
-SAFE_MIN = MIN_MM + MARGIN_MM   # 18
-SAFE_MAX = MAX_MM - MARGIN_MM   # 76
+MARGIN_MM = 1.0
+SAFE_MIN = MIN_MM + MARGIN_MM
+SAFE_MAX = MAX_MM - MARGIN_MM
 MID_MM = (SAFE_MIN + SAFE_MAX) / 2.0
+
+
+def set_motion_limits(min_mm: float, max_mm: float):
+    global MIN_MM, MAX_MM, SAFE_MIN, SAFE_MAX, MID_MM
+
+    min_mm = float(min_mm)
+    max_mm = float(max_mm)
+
+    if max_mm <= min_mm:
+        raise ValueError("MAX_MM должен быть больше MIN_MM")
+
+    if (max_mm - min_mm) <= (2.0 * MARGIN_MM):
+        raise ValueError(
+            f"Диапазон должен быть больше {2.0 * MARGIN_MM:.1f} мм с учетом защитного отступа"
+        )
+
+    MIN_MM = min_mm
+    MAX_MM = max_mm
+    SAFE_MIN = MIN_MM + MARGIN_MM
+    SAFE_MAX = MAX_MM - MARGIN_MM
+    MID_MM = (SAFE_MIN + SAFE_MAX) / 2.0
 
 AUTO_SPEED = 250   # мм/с
 JOG_SPEED = 500    # мм/с
@@ -129,7 +150,7 @@ class StandVCP:
         self.ser = None
         self.busy = False
 
-    def send_wait_done(self, cmd: str, timeout_s: float = 30.0):
+    def send_wait_done(self, cmd: str, timeout_s: float = 200.0):
         if not self.is_connected():
             return
 
@@ -576,12 +597,16 @@ def process_stand_thread(
         if reset_event.is_set():
             with lock:
                 for ch in display_channels:
-                    channel_buffers[ch] = np.full(WINDOW_SIZE, np.nan, dtype=float)
+                    channel_buffers[ch].fill(np.nan)
                 save_buffer.clear()
                 write_index = 0
 
             with raw_lock:
                 raw_bytes_buffer.clear()
+
+            with last_lock:
+                for ch in display_channels:
+                    last_values[ch] = None
 
             pos_hist.clear()
             reset_event.clear()
@@ -702,6 +727,7 @@ def process_stand_thread(
                     dt = now - t0
                     if dt > 1e-6:
                         frame["V"] = (float(pos) - p0) / dt   # мм/с
+                        frame["V"] = frame["V"] / 1000
                     else:
                         frame["V"] = np.nan
                 else:
@@ -791,6 +817,7 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout(root)
 
         self.panel = ControlPanel()
+        self.panel.set_motion_limits(MIN_MM, MAX_MM)
         layout.addWidget(self.panel, 0)
 
         self.win = pg.GraphicsLayoutWidget(show=False, title="Стенд — каналы")
@@ -798,6 +825,7 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(root)
         self.panel.start_pressure.connect(self._start_pressure)
+        self.panel.motion_limits_changed.connect(self._set_motion_limits)
 
         # plots
         self.curves = {}
@@ -840,6 +868,17 @@ class MainWindow(QMainWindow):
         self.panel.stop_auto.connect(self._stop_auto)
         self.panel.jog.connect(self._jog)
 
+    def _set_motion_limits(self, min_mm: float, max_mm: float):
+        try:
+            set_motion_limits(min_mm, max_mm)
+            self.panel.set_motion_limits(MIN_MM, MAX_MM)
+            print(
+                f"[LIMITS] MIN_MM={MIN_MM:.1f}, MAX_MM={MAX_MM:.1f}, "
+                f"SAFE_MIN={SAFE_MIN:.1f}, SAFE_MAX={SAFE_MAX:.1f}"
+            )
+        except Exception as e:
+            print(f"[LIMITS] error: {e}")
+
     def _get_pos_mm(self):
         with self.last_lock:
             v = self.last_values.get("C3")
@@ -874,6 +913,29 @@ class MainWindow(QMainWindow):
         if np.isnan(v2):
             return v1
         return max(v1, v2)
+    
+    def _perform_reset(self):
+        self.timer.stop()
+
+        with self.lock:
+            for ch in display_channels:
+                self.channel_buffers[ch].fill(0.0)
+            self.save_buffer.clear()
+
+        with self.raw_lock:
+            self.raw_bytes_buffer.clear()
+
+        with self.last_lock:
+            for ch in display_channels:
+                self.last_values[ch] = None
+
+        self.reset_event.clear()
+
+        for ch in display_channels:
+            self.curves[ch].setData(self.channel_buffers[ch])
+
+        self.timer.start(20)
+        print("[INFO] buffers cleared")
 
     def _start_pressure(self, params: dict):
         if not self.vcp.is_connected():
@@ -941,16 +1003,14 @@ class MainWindow(QMainWindow):
 
         with self.queue_lock:
             self.data_queue.clear()
-        with self.lock:
-            for ch in display_channels:
-                self.channel_buffers[ch][:] = np.nan
-            self.save_buffer.clear()
 
         for t in getattr(self, "data_threads", []):
             try:
                 t.join(timeout=1.5)
             except Exception:
                 pass
+
+        self._perform_reset()
 
         self._data_threads_started = False
         self.panel.sel_data.set_connected(False)
@@ -982,7 +1042,7 @@ class MainWindow(QMainWindow):
         self.motion.start_auto(runs, speed)
     
     def _clear_plot_buffers(self):
-        self.reset_event.set()
+        self._perform_reset()
 
     def _stop_auto(self):
         self.motion.stop_all()
@@ -1003,20 +1063,31 @@ class MainWindow(QMainWindow):
     def _update_plots(self):
         with self.lock:
             buffers_snapshot = {
-            ch: self.channel_buffers[ch].copy()
-            for ch in display_channels
-        }
+                ch: self.channel_buffers[ch].copy()
+                for ch in display_channels
+            }
 
         for ch in display_channels:
-            self.curves[ch].setData(buffers_snapshot[ch])
+            y = buffers_snapshot[ch]
+            mask = np.isfinite(y)
+
+            if not np.any(mask):
+                self.curves[ch].clear()
+                continue
+
+            self.curves[ch].setData(y[mask])
             
         
     def keyPressEvent(self, event):
         key = event.key()
 
         if key == QtCore.Qt.Key.Key_N:
-            self.reset_event.set()
-            print("[INFO] clear requested")
+            try:
+                self._perform_reset()
+                print("[INFO] clear requested")
+            except Exception as e:
+                print(f"[N ERROR] {e}")
+
             event.accept()
             return
 
@@ -1049,7 +1120,7 @@ class MainWindow(QMainWindow):
                     with open(raw_name, "w", encoding="utf-8") as f:
                         f.write(" ".join(f"{b:02X}" for b in self.raw_bytes_buffer))
 
-                self.reset_event.set()
+                self._perform_reset()
                 print("[INFO] clear requested after save")
 
             except Exception as e:
